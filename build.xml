@@ -122,62 +122,26 @@
                 <src path="${gen.absolute.dir}" />
                 <compilerarg line="${java.compilerargs}" />
             </kotlinc>
-
-            <!-- if the project is instrumented, intrument the classes -->
-            <if condition="${build.is.instrumented}">
-                <then>
-                    <echo level="info">Instrumenting classes from ${out.absolute.dir}/classes...</echo>
-
-                    <!-- build the filter to remove R, Manifest, BuildConfig -->
-                    <getemmafilter
-                            appPackage="${project.app.package}"
-                            libraryPackagesRefId="project.library.packages"
-                            filterOut="emma.default.filter"/>
-
-                    <!-- define where the .em file is going. This may have been
-                         setup already if this is a library -->
-                    <property name="emma.coverage.absolute.file" location="${out.absolute.dir}/coverage.em" />
-
-                    <!-- It only instruments class files, not any external libs -->
-                    <emma enabled="true">
-                        <instr verbosity="${verbosity}"
-                               mode="overwrite"
-                               instrpath="${out.absolute.dir}/classes"
-                               outdir="${out.absolute.dir}/classes"
-                               metadatafile="${emma.coverage.absolute.file}">
-                            <filter excludes="${emma.default.filter}" />
-                            <filter value="${emma.filter}" />
-                        </instr>
-                    </emma>
-                </then>
-            </if>
-
-            <!-- if the project is a library then we generate a jar file -->
-            <if condition="${project.is.library}">
-                <then>
-                    <echo level="info">Creating library output jar file...</echo>
-                    <property name="out.library.jar.file" location="${out.absolute.dir}/classes.jar" />
-                    <if>
-                        <condition>
-                            <length string="${android.package.excludes}" trim="true" when="greater" length="0" />
-                        </condition>
-                        <then>
-                            <echo level="info">Custom jar packaging exclusion: ${android.package.excludes}</echo>
-                        </then>
-                    </if>
-
-                    <propertybyreplace name="project.app.package.path" input="${project.app.package}" replace="." with="/" />
-
-                    <jar destfile="${out.library.jar.file}">
-                        <fileset dir="${out.classes.absolute.dir}"
-                                includes="**/*.class"
-                                excludes="${project.app.package.path}/R.class ${project.app.package.path}/R$*.class ${project.app.package.path}/BuildConfig.class"/>
-                        <fileset dir="${source.absolute.dir}" excludes="**/*.java ${android.package.excludes}" />
-                    </jar>
-                </then>
-            </if>
-
         </do-only-if-manifest-hasCode>
+    </target>
+    <target name="-dex" depends="-compile, -post-compile, -obfuscate">
+        <do-only-if-manifest-hasCode elseText="hasCode = false. Skipping...">
+            <!-- only convert to dalvik bytecode is *not* a library -->
+            <do-only-if-not-library elseText="Library project: do not convert bytecode..." >
+                <dex-helper nolocals="true">
+                    <external-libs>
+                        <fileset file="${kotlin.lib}/kotlin-stdlib.jar" />
+                    </external-libs>
+                </dex-helper>
+            </do-only-if-not-library>
+        </do-only-if-manifest-hasCode>
+    </target>
+    <target name="-package" depends="-dex, -package-resources">
+        <package-helper>
+            <extra-jars>
+                <jarfile path="${kotlin.lib}/kotlin-stdlib.jar" />
+            </extra-jars>
+        </package-helper>
     </target>
     <import file="${sdk.dir}/tools/ant/build.xml" />
 

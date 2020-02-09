@@ -58,6 +58,8 @@ in
     export GNUMAKE=${gnumake}/bin/make
     export NDK_HOST_AWK=${gawk}/bin/gawk
     export CARGO_HOME="$(pwd)/.cargo"
+    # first for debug
+    ant debug
     mkdir -p .cargo
     (echo "[target.aarch64-linux-android]"
      echo "linker = \"${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin/aarch64-linux-android-ld\""
