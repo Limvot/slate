@@ -35,6 +35,7 @@ in
     name = "moz_overlay_shell";
     src = ./.;
     ANDROID_HOME = "${androidsdk}/libexec/android-sdk";
+    KOTLIN_LIB_HOME = "${kotlin}/lib";
     buildInputs = [
       file
       tree
@@ -49,8 +50,8 @@ in
         "armv7-linux-androideabi"
       ]; })
       androidsdk
+      kotlin
     ];
-    #ant ${antFlags} ${if release then "release" else "debug"}
   buildPhase = ''
     export ANDROID_SDK_HOME=`pwd` # Key files cannot be stored in the user's home directory. This overrides it.
 
@@ -66,13 +67,13 @@ in
      echo "linker = \"${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin/arm-linux-androideabi-ld\""
      echo "rustflags = [\"-Clink-args=-L${androidsdk}/libexec/android-sdk/ndk-bundle/platforms/android-26/arch-arm/usr/lib -L${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/lib/gcc/arm-linux-androideabi/4.9.x\"]"
 
-     ) >> .cargo/config
-     pushd rust
+    ) >> .cargo/config
+    pushd rust
 
      PATH="${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/aarch64-linux-android-4.9/prebuilt/linux-x86_64/bin:$PATH" cargo build --target aarch64-linux-android --release
     mkdir -p ../jni/arm64-v8a
     cp target/aarch64-linux-android/release/librust.so ../jni/arm64-v8a/
-     PATH="${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin:$PATH" cargo build --target armv7-linux-androideabi --release
+    PATH="${androidsdk}/libexec/android-sdk/ndk-bundle/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin:$PATH" cargo build --target armv7-linux-androideabi --release
     mkdir -p ../jni/armeabi-v7a
     cp target/armv7-linux-androideabi/release/librust.so ../jni/armeabi-v7a/
     (echo ""
@@ -84,22 +85,18 @@ in
      echo 'LOCAL_SRC_FILES := $(TARGET_ARCH_ABI)/librust.so'
      echo ""
      echo 'include $(BUILD_SHARED_LIBRARY)'
-     ) >> ../jni/Android.mk
-     popd
-     nm -g ./jni/arm64-v8a/librust.so
+    ) >> ../jni/Android.mk
+    popd
+    nm -g ./jni/arm64-v8a/librust.so
     ${androidsdk}/libexec/android-sdk/ndk-bundle/ndk-build
-     nm -g ./libs/arm64-v8a/librust.so
-     cp ./jni/arm64-v8a/librust.so ./libs/arm64-v8a/librust.so
-     cp ./jni/armeabi-v7a/librust.so ./libs/armeabi-v7a/librust.so
-     nm -g ./libs/arm64-v8a/librust.so
+    nm -g ./libs/arm64-v8a/librust.so
+    cp ./jni/arm64-v8a/librust.so ./libs/arm64-v8a/librust.so
+    cp ./jni/armeabi-v7a/librust.so ./libs/armeabi-v7a/librust.so
+    nm -g ./libs/arm64-v8a/librust.so
     ant debug
   '';
-    #mv bin/*-${if release then "release" else "debug"}.apk $out
   installPhase = ''
     mkdir -p $out
     mv bin/*-debug.apk $out
-
-    mkdir -p $out/nix-support
-    echo "file binary-dist \"$(echo $out/*.apk)\"" > $out/nix-support/hydra-build-products
   '';
   }
