@@ -1,7 +1,9 @@
 package io.github.limvot.slate
 
 import android.os.Bundle
-import android.widget.Toast
+import android.os.Handler
+import android.os.Looper
+import android.content.Context
 import android.graphics.fonts.*
 
 import androidx.compose.*;
@@ -47,23 +49,7 @@ fun MyTextBoxV(value: MyTextBox) {
     ) {
         TextField(
                 value = value.text_field,
-                onValueChange = {
-                    /*var start = it.selection.start*/
-                    /*var end = it.selection.start*/
-                    /*var idx = it.text.indexOf('\u0000')*/
-                    /*while (idx != -1) {*/
-                        /*if (idx < start) {*/
-                            /*start -= 1;*/
-                        /*}*/
-                        /*if (idx < end) {*/
-                            /*end -= 1;*/
-                        /*}*/
-                        /*idx = it.text.indexOf('\u0000', startIndex=idx+1)*/
-                    /*}*/
-                    /*println("changiing ${it.text} for " + it.text.replace("\u0000", ""))*/
-                    /*value.text_field = TextFieldValue(it.text.replace("\u0000", ""), TextRange(start, end))*/
-                    value.text_field = it
-                }
+                onValueChange = { value.text_field = it }
         )
     }
 }
@@ -71,39 +57,21 @@ fun MyTextBoxV(value: MyTextBox) {
 
 @Model
 class LoginState(var server: MyTextBox, var username: MyTextBox, var password: MyTextBox) {
-    fun login_request(success: (JSONObject) -> Unit, failure: (VolleyError) -> Unit): JsonObjectRequest {
-        val server = server.text_field.text.replace("\u0000","")
-        val ob = JSONObject(mapOf(
-                    "type" to "m.login.password",
-                    "user" to username.text_field.text.replace("\u0000",""),
-                    "password" to password.text_field.text.replace("\u0000","")
-                ));
-                println("ob: $ob")
-        val request = JsonObjectRequest(
-                Request.Method.POST,
-                "https://${server}/_matrix/client/r0/login",
-                ob,
-                Response.Listener { success(it) },
-                Response.ErrorListener { failure(it) }
-        )
-        request.setRetryPolicy(DefaultRetryPolicy(
-                DefaultRetryPolicy.DEFAULT_TIMEOUT_MS*10,
-                DefaultRetryPolicy.DEFAULT_MAX_RETRIES,
-                DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
-        ))
-        return request
-    }
 }
 @Composable
-fun LoginStateV(login_state: LoginState, login: (LoginState) -> Unit) {
+fun LoginStateV(login_state: LoginState, login: (String, String, String) -> Unit) {
     MaterialTheme {
-        /*Column( modifier = Modifier.padding(16.dp) ){*/
         Column( ) {
+            Text("Slate:", style = MaterialTheme.typography.h2)
             Text("Don't worry about any weird spaces you didn't type - they're nulls due to a bug in either Jetpack Compose or the Samsung Keyboard, I strip them before they're sent")
             MyTextBoxV(value = login_state.server)
             MyTextBoxV(value = login_state.username)
             MyTextBoxV(value = login_state.password)
-            Button(onClick = { login(login_state) }) {
+            Button(onClick = {
+                login(  login_state.server.text_field.text.replace("\u0000",""),
+                        login_state.username.text_field.text.replace("\u0000",""),
+                        login_state.password.text_field.text.replace("\u0000",""))
+            }) {
                 Text("Login")
             }
         }
@@ -114,7 +82,6 @@ fun LoginStateV(login_state: LoginState, login: (LoginState) -> Unit) {
 data class RoomList( var rooms: MutableList<Room>)
 @Composable
 fun RoomListV(roomList: RoomList, onClickRoom: (String) -> Unit) {
-    /*Column( modifier = Modifier.padding(16.dp)) {*/
     Column( ) {
         Text("Rooms:", style = MaterialTheme.typography.h5)
         Spacer(modifier = Modifier.preferredHeight(16.dp))
@@ -130,7 +97,6 @@ fun RoomListV(roomList: RoomList, onClickRoom: (String) -> Unit) {
 data class Room( val id: String, var name: String, var timeline: MutableList<Event>)
 @Composable
 fun ChatV(room: Room, entry_box: MyTextBox, send_message: (Room, String) -> Unit) {
-    /*Column( modifier = Modifier.padding(16.dp)) {*/
     Column( ) {
         Text("${room.name}: ", style = MaterialTheme.typography.h5)
         Spacer(modifier = Modifier.preferredHeight(16.dp))
@@ -146,7 +112,7 @@ fun ChatV(room: Room, entry_box: MyTextBox, send_message: (Room, String) -> Unit
 }
 
 @Model
-data class Event( var sender: String, var content_body: String, val origin_server_ts: Long)
+data class Event( val event_id: String, var sender: String, var content_body: String, val origin_server_ts: Long)
 @Composable
 fun EventV(event: Event) {
     Text("${event.sender}: ${event.content_body}", style = MaterialTheme.typography.body1)
@@ -157,10 +123,13 @@ enum class AppStateEnum {
 }
 
 @Model
-class AppState(val queue: RequestQueue) {
+class AppState(val context: Context) {
+    // Total app state enum
     var app_state_enum: AppStateEnum
 
     // Common to all
+    val queue: RequestQueue
+    val time_handler: Handler
     val status: Status
 
     // Login
@@ -169,12 +138,17 @@ class AppState(val queue: RequestQueue) {
     // Common to rooms and chat
     var login_response: JSONObject? = null
     var current_sync: JSONObject? = null
+
     // Rooms
     var room_list: RoomList
+
     // Chat
     var current_room: String? = null
     var entry_box: MyTextBox
+
     init {
+        queue = Volley.newRequestQueue(context)
+        time_handler = Handler(Looper.getMainLooper())
         status = Status("")
         app_state_enum = AppStateEnum.LOGIN
         login_state = LoginState( MyTextBox("matrix.org"),
@@ -183,25 +157,13 @@ class AppState(val queue: RequestQueue) {
         room_list = RoomList(mutableListOf())
         entry_box = MyTextBox("chat...")
     }
-    fun send_message(room: Room, message: String) {
-        val room_id = room.id
-        val home_server = login_response?.getString("home_server")
-        val access_token = login_response?.getString("access_token")
-        val url = "https://$home_server/_matrix/client/r0/rooms/$room_id/send/m.room.message?access_token=$access_token";
-        val ob = JSONObject(mapOf("msgtype" to "m.text", "body" to message));
-        val origin_server_ts = room.timeline.lastOrNull()?.origin_server_ts ?: 0
-        val sending_event = Event("You", "sending: $message...", origin_server_ts)
-        room.timeline.add(sending_event)
+    fun send_request(method: Int, url: String, obj: Map<String,String>?, success: (JSONObject) -> Unit, failure: (VolleyError) -> Unit) {
         val request = JsonObjectRequest(
-                Request.Method.POST,
+                method,
                 url,
-                ob,
-                Response.Listener {
-                    sending_event.content_body = "✓ $message"
-                },
-                Response.ErrorListener {
-                    sending_event.content_body = "Failed to send $message..."
-                }
+                obj?.let { JSONObject(it) } ?: null,
+                Response.Listener { success(it) },
+                Response.ErrorListener { failure(it) }
         )
         request.setRetryPolicy(DefaultRetryPolicy(
                 DefaultRetryPolicy.DEFAULT_TIMEOUT_MS*10,
@@ -210,7 +172,47 @@ class AppState(val queue: RequestQueue) {
         ))
         queue.add(request)
     }
-    fun sync_request(success: () -> Unit, failure: (VolleyError) -> Unit) {
+    fun send_read(room: Room) {
+        val event_id = room.timeline.lastOrNull()?.event_id
+        if (event_id != null) {
+            val room_id = room.id
+            val home_server = login_response?.getString("home_server")
+            val access_token = login_response?.getString("access_token")
+            val url = "https://$home_server/_matrix/client/r0/rooms/$room_id/read_markers?access_token=$access_token";
+            send_request(Request.Method.POST, url, mapOf("m.fully_read" to event_id, "m.read" to event_id),
+                        { /* success */ }, { /* failure, should retry */ })
+        }
+    }
+    fun send_message(room: Room, message: String) {
+        val room_id = room.id
+        val home_server = login_response?.getString("home_server")
+        val access_token = login_response?.getString("access_token")
+        val url = "https://$home_server/_matrix/client/r0/rooms/$room_id/send/m.room.message?access_token=$access_token";
+        val origin_server_ts = room.timeline.lastOrNull()?.origin_server_ts ?: 0
+        val sending_event = Event("fake_id", "You", "sending: $message...", origin_server_ts)
+        room.timeline.add(sending_event)
+        send_request(Request.Method.POST, url, mapOf("msgtype" to "m.text", "body" to message),
+                    { sending_event.content_body = "✓ $message" },
+                    { sending_event.content_body = "Failed to send $message..." })
+    }
+    fun login_request(server: String, username: String, password: String) {
+        send_request(
+                Request.Method.POST,
+                "https://${server}/_matrix/client/r0/login",
+                mapOf( "type" to "m.login.password",
+                       "user" to username,
+                       "password" to password),
+                { response ->
+                    status.text = "Logged in, syncing..."
+                    login_response = response
+                    app_state_enum = AppStateEnum.ROOMS
+                    sync_request({ status.text = "Synced!" })
+                },
+                { e ->
+                    status.text = "Login didn't work: $e, ${e.networkResponse?.headers}, ${e.networkResponse?.data?.let { String(it)}}"
+                })
+    }
+    fun sync_request(success: () -> Unit) {
         val home_server = login_response?.getString("home_server")
         val access_token = login_response?.getString("access_token")
         val timeout_ms = DefaultRetryPolicy.DEFAULT_TIMEOUT_MS*10
@@ -221,23 +223,18 @@ class AppState(val queue: RequestQueue) {
             val limit = 5
             "https://$home_server/_matrix/client/r0/sync?filter={\"room\":{\"timeline\":{\"limit\":$limit}}}&access_token=$access_token"
         }
-        val request = JsonObjectRequest(
-                Request.Method.GET,
-                url,
-                null,
-                Response.Listener {
-                    update_with_sync(it)
-                    success()
-                    sync_request({ }, { failure(it) })
-                },
-                Response.ErrorListener { failure(it) }
-        )
-        request.setRetryPolicy(DefaultRetryPolicy(
-                timeout_ms,
-                DefaultRetryPolicy.DEFAULT_MAX_RETRIES,
-                DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
-        ))
-        queue.add(request)
+        send_request(Request.Method.GET, url, null,
+                    {
+                        update_with_sync(it)
+                        success()
+                        sync_request({ })
+                    },
+                    { e ->
+                        status.text = "Sync didn't work: $e, ${e.networkResponse?.headers}, ${e.networkResponse?.data?.let { String(it)}}"
+                        time_handler.postDelayed({
+                            sync_request({ status.text = "Sync back online" })
+                        }, 5000)
+                    })
     }
     fun update_with_sync(sync_object: JSONObject) {
         val rooms = sync_object.optJSONObject("rooms")?.optJSONObject("join")
@@ -261,7 +258,8 @@ class AppState(val queue: RequestQueue) {
                     val sender = it.getString("sender");
                     val content_body = it.optJSONObject("content")?.optString("body") ?: "<no body>";
                     val origin_server_ts = it.getLong("origin_server_ts");
-                    room.timeline.add(Event(sender, content_body, origin_server_ts))
+                    val event_id = it.getString("event_id");
+                    room.timeline.add(Event(event_id, sender, content_body, origin_server_ts))
                 }
             }
         }
@@ -271,53 +269,27 @@ class AppState(val queue: RequestQueue) {
 }
 @Composable
 fun AppStateV(app_state: AppState) {
-    val typography = MaterialTheme.typography
     MaterialTheme {
         Column(
                 modifier = Modifier.padding(16.dp)
         ){
-            /*Image(image,*/
-            /*modifier = Modifier.preferredHeightIn(maxHeight = 180.dp)*/
-            /*.fillMaxWidth()*/
-            /*.clip(shape = RoundedCornerShape(4.dp)),*/
-            /*contentScale = ContentScale.Crop*/
-            /*)*/
-            Text("Slate:", style = typography.h2)
             StatusV(app_state.status) { status ->
-                /*Toast.makeText(context, "You just clicked on ${status.text}", Toast.LENGTH_LONG).show()*/
                 status.text += "holla"
             }
             when(app_state.app_state_enum) {
                 AppStateEnum.LOGIN -> {
-                    LoginStateV(app_state.login_state, { login_state ->
-                        app_state.status.text = "Trying to log in"
-                        app_state.queue.add(login_state.login_request(
-                                { response ->
-                                    app_state.status.text = "Logged in, syncing..."
-                                    app_state.login_response = response
-                                    app_state.app_state_enum = AppStateEnum.ROOMS
-                                    app_state.sync_request({
-                                        app_state.status.text = "Synced!"
-                                    }, { e ->
-                                        app_state.status.text = "Sync didn't work: $e, ${e.networkResponse?.headers}, ${e.networkResponse?.data?.let { String(it)}}"
-                                    })
-                                },
-                                { e ->
-                                    app_state.status.text = "Login didn't work: $e, ${e.networkResponse?.headers}, ${e.networkResponse?.data?.let { String(it)}}"
-                                }
-                        ))
-                    })
+                    LoginStateV(app_state.login_state, app_state::login_request)
                 }
                 AppStateEnum.ROOMS -> {
                     RoomListV(app_state.room_list) { room ->
-                        app_state.status.text = "room id: $room"
                         app_state.current_room = room
                         app_state.app_state_enum = AppStateEnum.CHAT
                     }
                 }
                 AppStateEnum.CHAT -> {
-                    ChatV(app_state.room_list.rooms.first{ it.id == app_state.current_room },
-                          app_state.entry_box,
+                    val room = app_state.room_list.rooms.first{ it.id == app_state.current_room }
+                    app_state.send_read(room)
+                    ChatV(room, app_state.entry_box,
                           { room, message -> app_state.send_message(room, message) })
                 }
             }
@@ -330,10 +302,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            app_state = AppState(Volley.newRequestQueue(this))
+            app_state = AppState(this)
             AppStateV(app_state!!)
-            /*val typography = TextStyle(fontFamily = FontFamily.Monospace)*/
-            /*val typography = Typography(defaultFontFamily = FontFamily.Monospace)*/
         }
     }
     override fun onBackPressed() {
